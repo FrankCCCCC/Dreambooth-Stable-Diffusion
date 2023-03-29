@@ -12,10 +12,11 @@ from pytorch_lightning import seed_everything
 from torch import autocast
 from contextlib import contextmanager, nullcontext
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from ldm.util import instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
 from ldm.models.diffusion.plms import PLMSSampler
-
 
 def chunk(it, size):
     it = iter(it)
@@ -175,6 +176,13 @@ def main():
         default="autocast"
     )
 
+    parser.add_argument(
+        "--gpu",
+        type=str,
+        help="GPU device",
+        default=None
+    )
+
 
     parser.add_argument(
         "--embedding_path", 
@@ -195,8 +203,12 @@ def main():
     model = load_model_from_config(config, f"{opt.ckpt}")
     #model.embedding_manager.load(opt.embedding_path)
 
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    model = model.to(device)
+    if opt.gpu == None:        
+        device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        model = model.to(device)
+    else:
+        device = torch.device(f"cuda:{opt.gpu}")
+        model = model.to(device)
 
     if opt.plms:
         sampler = PLMSSampler(model)

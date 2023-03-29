@@ -20,6 +20,7 @@ from pytorch_lightning.utilities import rank_zero_info
 
 from ldm.data.base import Txt2ImgIterableBaseDataset
 from ldm.util import instantiate_from_config
+from backdoor.dataset import get_data_loader, DatasetLoader, Backdoor
 
 def load_model_from_config(config, ckpt, verbose=False):
     print(f"Loading model from {ckpt}")
@@ -254,6 +255,14 @@ class DataModuleFromConfig(pl.LightningDataModule):
         for data_cfg in self.dataset_configs.values():
             instantiate_from_config(data_cfg)
 
+    # def setup(self, stage=None):
+    #     self.datasets = dict(
+    #         (k, instantiate_from_config(self.dataset_configs[k]))
+    #         for k in self.dataset_configs)
+    #     if self.wrap:
+    #         for k in self.datasets:
+    #             self.datasets[k] = WrappedDataset(self.datasets[k])
+    
     def setup(self, stage=None):
         self.datasets = dict(
             (k, instantiate_from_config(self.dataset_configs[k]))
@@ -261,6 +270,8 @@ class DataModuleFromConfig(pl.LightningDataModule):
         if self.wrap:
             for k in self.datasets:
                 self.datasets[k] = WrappedDataset(self.datasets[k])
+        
+        self.datasets['train'] = get_data_loader(dataset=DatasetLoader.CIFAR10, trigger=Backdoor.TRIGGER_SM_STOP_SIGN, target=Backdoor.TARGET_TG, ds_root="datasets", clean_rate=1, poison_rate=0.5, dataset_load_mode=DatasetLoader.MODE_FIXED)
 
     def _train_dataloader(self):
         is_iterable_dataset = isinstance(self.datasets['train'], Txt2ImgIterableBaseDataset)
@@ -782,57 +793,57 @@ if __name__ == "__main__":
             print(f"{k}, {data.datasets[k].__class__.__name__}, {len(data.datasets[k])}")
 
         # configure learning rate
-        bs, base_lr = config.data.params.batch_size, config.model.base_learning_rate
-        if not cpu:
-            ngpu = len(lightning_config.trainer.gpus.strip(",").split(','))
-        else:
-            ngpu = 1
-        if 'accumulate_grad_batches' in lightning_config.trainer:
-            accumulate_grad_batches = lightning_config.trainer.accumulate_grad_batches
-        else:
-            accumulate_grad_batches = 1
-        print(f"accumulate_grad_batches = {accumulate_grad_batches}")
-        lightning_config.trainer.accumulate_grad_batches = accumulate_grad_batches
-        if opt.scale_lr:
-            model.learning_rate = accumulate_grad_batches * ngpu * bs * base_lr
-            print(
-                "Setting learning rate to {:.2e} = {} (accumulate_grad_batches) * {} (num_gpus) * {} (batchsize) * {:.2e} (base_lr)".format(
-                    model.learning_rate, accumulate_grad_batches, ngpu, bs, base_lr))
-        else:
-            model.learning_rate = base_lr
-            print("++++ NOT USING LR SCALING ++++")
-            print(f"Setting learning rate to {model.learning_rate:.2e}")
+        # bs, base_lr = config.data.params.batch_size, config.model.base_learning_rate
+        # if not cpu:
+        #     ngpu = len(lightning_config.trainer.gpus.strip(",").split(','))
+        # else:
+        #     ngpu = 1
+        # if 'accumulate_grad_batches' in lightning_config.trainer:
+        #     accumulate_grad_batches = lightning_config.trainer.accumulate_grad_batches
+        # else:
+        #     accumulate_grad_batches = 1
+        # print(f"accumulate_grad_batches = {accumulate_grad_batches}")
+        # lightning_config.trainer.accumulate_grad_batches = accumulate_grad_batches
+        # if opt.scale_lr:
+        #     model.learning_rate = accumulate_grad_batches * ngpu * bs * base_lr
+        #     print(
+        #         "Setting learning rate to {:.2e} = {} (accumulate_grad_batches) * {} (num_gpus) * {} (batchsize) * {:.2e} (base_lr)".format(
+        #             model.learning_rate, accumulate_grad_batches, ngpu, bs, base_lr))
+        # else:
+        #     model.learning_rate = base_lr
+        #     print("++++ NOT USING LR SCALING ++++")
+        #     print(f"Setting learning rate to {model.learning_rate:.2e}")
 
 
-        # allow checkpointing via USR1
-        def melk(*args, **kwargs):
-            # run all checkpoint hooks
-            if trainer.global_rank == 0:
-                print("Summoning checkpoint.")
-                ckpt_path = os.path.join(ckptdir, "last.ckpt")
-                trainer.save_checkpoint(ckpt_path)
+        # # allow checkpointing via USR1
+        # def melk(*args, **kwargs):
+        #     # run all checkpoint hooks
+        #     if trainer.global_rank == 0:
+        #         print("Summoning checkpoint.")
+        #         ckpt_path = os.path.join(ckptdir, "last.ckpt")
+        #         trainer.save_checkpoint(ckpt_path)
 
 
-        def divein(*args, **kwargs):
-            if trainer.global_rank == 0:
-                import pudb;
-                pudb.set_trace()
+        # def divein(*args, **kwargs):
+        #     if trainer.global_rank == 0:
+        #         import pudb;
+        #         pudb.set_trace()
 
 
-        import signal
+        # import signal
 
-        signal.signal(signal.SIGUSR1, melk)
-        signal.signal(signal.SIGUSR2, divein)
+        # signal.signal(signal.SIGUSR1, melk)
+        # signal.signal(signal.SIGUSR2, divein)
 
-        # run
-        if opt.train:
-            try:
-                trainer.fit(model, data)
-            except Exception:
-                melk()
-                raise
-        if not opt.no_test and not trainer.interrupted:
-            trainer.test(model, data)
+        # # run
+        # if opt.train:
+        #     try:
+        #         trainer.fit(model, data)
+        #     except Exception:
+        #         melk()
+        #         raise
+        # if not opt.no_test and not trainer.interrupted:
+        #     trainer.test(model, data)
     except Exception:
         if opt.debug and trainer.global_rank == 0:
             try:
